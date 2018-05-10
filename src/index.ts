@@ -1,5 +1,4 @@
 import { MongoClient } from 'mongodb'
-import { BADSTR } from 'dns';
 import axios from 'axios'
 
 async function main() {
