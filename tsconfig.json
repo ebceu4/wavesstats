@@ -8,7 +8,8 @@
     "noImplicitAny": true
   },
   "include": [
-    "./src/**/*"
+    "./src/**/*",
+    "./declarations/**/*"
   ],
   "exclude": [
     "node_modules",

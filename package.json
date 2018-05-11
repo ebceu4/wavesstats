@@ -10,7 +10,8 @@
     "build": "npm run build:commonjs && npm run build:es",
     "ts": "ts-node src/",
     "prepublishOnly": "npm run build",
-    "db": "mongod"
+    "db": "mongod",
+    "restart": "rm -rf data && mkdir -p data/db && mongod --dbpath data/db"
   },
   "author": "",
   "license": "ISC",
@@ -28,6 +29,8 @@
   "module": "./es/index.js",
   "dependencies": {
     "axios": "^0.18.0",
+    "bignumber.js": "^7.0.1",
+    "json-bigint": "^0.2.3",
     "mongodb": "^3.0.8"
   }
 }
