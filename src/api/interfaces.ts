@@ -2,7 +2,7 @@ import { BigNumber } from 'bignumber.js'
 
 export type Asset = string | null
 
-export type Long = number | BigNumber
+export type Long = number //| BigNumber
 
 export const enum TransactionType {
   Genesis = 1,
@@ -32,6 +32,7 @@ export interface Block {
   blocksize: number;
   height: number;
   transactions: Transaction[];
+  signature: string;
 
   // only in version 3
   transactionCount?: number;
@@ -40,6 +41,7 @@ export interface Block {
 
 export interface Order {
   id: string;
+  sender: string;
   senderPublicKey: string;
   matcherPublicKey: string;
   assetPair: {
@@ -64,7 +66,7 @@ interface Tx {
   version?: number;
 }
 
-interface WithSender {
+export interface WithSender {
   sender: string;
   senderPublicKey: string;
 }
@@ -128,6 +130,14 @@ export interface Tx7 extends Tx, WithSender {
   price: Long;
   buyMatcherFee: Long;
   sellMatcherFee: Long;
+  pair: {
+    priceAsset: Asset;
+    amountAsset: Asset;
+    priceDecimals: number;
+    amountDecimals: number;
+  }
+  //computed
+
 }
 
 // lease

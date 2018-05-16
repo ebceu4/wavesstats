@@ -28,9 +28,12 @@
   "jsnext:main": "./es/index.js",
   "module": "./es/index.js",
   "dependencies": {
+    "@types/linq": "^2.2.33",
+    "@waves/waves-api": "^0.28.0",
     "axios": "^0.18.0",
     "bignumber.js": "^7.0.1",
     "json-bigint": "^0.2.3",
+    "linq": "^3.1.0",
     "mongodb": "^3.0.8"
   }
 }
