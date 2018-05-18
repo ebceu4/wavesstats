@@ -29,63 +29,81 @@ async function getDecimals(asset: Asset): Promise<number> {
 }
 
 async function getBlocks(from: number, to: number): Promise<Block[]> {
+  try {
+    const result = (await axios.get(`https://nodes.wavesnodes.com/blocks/seq/${from}/${to}`, {
+      transformResponse: (data) => {
+        const blocks: any[] = J.parse(data)
+        return blocks.map((b: Block) => {
+          b._id = b.signature
+          return b
+        })
+      }
+    })).data
+    const r = await Promise.all(result.map((b: Block) => Promise.all(
+      b.transactions.filter(t => t.type == TransactionType.Exchange).map(async (t: Tx7) => {
+        t.order1.sender = waves.tools.getAddressFromPublicKey(t.order1.senderPublicKey)
+        t.order2.sender = waves.tools.getAddressFromPublicKey(t.order2.senderPublicKey)
 
-  const result = (await axios.get(`https://nodes.wavesnodes.com/blocks/seq/${from}/${to}`, {
-    transformResponse: (data) => {
-      const blocks: any[] = J.parse(data)
-      return blocks.map((b: Block) => {
-        b._id = b.signature
-        return b
-      })
-    }
-  })).data
+        const amountAsset = t.order1.assetPair.amountAsset
+        const priceAsset = t.order1.assetPair.priceAsset
 
-  const r = await Promise.all(result.map((b: Block) => Promise.all(
-    b.transactions.filter(t => t.type == TransactionType.Exchange).map(async (t: Tx7) => {
-      t.order1.sender = waves.tools.getAddressFromPublicKey(t.order1.senderPublicKey)
-      t.order2.sender = waves.tools.getAddressFromPublicKey(t.order2.senderPublicKey)
+        const amountDecimals = await getDecimals(amountAsset)
+        const priceDecimals = await getDecimals(priceAsset)
 
-      const amountAsset = t.order1.assetPair.amountAsset
-      const priceAsset = t.order1.assetPair.priceAsset
+        t.pair = { amountAsset, amountDecimals, priceAsset, priceDecimals }
 
-      const amountDecimals = await getDecimals(amountAsset)
-      const priceDecimals = await getDecimals(priceAsset)
+        return true
+      }))
+    ))
 
-      t.pair = { amountAsset, amountDecimals, priceAsset, priceDecimals }
-
-      return true
-    }))
-  ))
-
-  return result
+    return result
+  }
+  catch (ex) {
+    console.log(ex)
+    console.log(`Retry from: ${from} to: ${to}`)
+    return getBlocks(from, to)
+  }
 }
-
 
 async function fetchBlocks() {
   let blocksTotal = 0
   const db = await MongoClient.connect(config.mongoUri)
   const blocksTable = await db.db('waves').createCollection('blocks')
-  const h = (await axios.get('https://nodes.wavesnodes.com/blocks/height')).data.height
+  blocksTable.createIndex({ "transactions.id": 1 })
+  blocksTable.createIndex({ _id: 1 })
+  const h = 1004100 // (await axios.get('https://nodes.wavesnodes.com/blocks/height')).data.height
+  const batchSize = 49
   let c = h
-  for (let index = 0; index < 100; index++) {
+
+  const start = Date.now()
+
+  async function fetch() {
     const t = c
-    c -= 9
-    const blocks = await getBlocks(t - 9, t)
+    c -= batchSize
+
+    const blocks = await getBlocks(t - batchSize, t)
 
     Promise.all(blocks.map(block => {
+      delete block._id
+
       blocksTable.update(
-        { "_id": block._id },
+        { "_id": block.height },
         { $set: block },
         { upsert: true }
-      )
+      ).catch(e => console.log(e))
     })).then(_ => {
-      blocksTotal += 10
-      console.log(`Blocks saved: ${blocksTotal}`)
-    })
+      blocksTotal += (batchSize + 1)
+      console.log(`Blocks saved from: ${t - batchSize} to: ${t}`)
+      console.log(`Total: ${blocksTotal}, Speed: ${Math.round(blocksTotal / ((Date.now() - start) / 1000))} blocks/s`)
+    }).catch(e => console.log(e))
 
+    setTimeout(fetch, 1 + Math.random() * 100)
   }
 
-  db.close()
+  for (let i = 0; i < 5; i++)
+    fetch()
+
+  //db.close()
 
 }
 
