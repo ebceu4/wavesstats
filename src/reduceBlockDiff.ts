@@ -1,31 +1,20 @@
-import { MongoClient } from 'mongodb'
+import { MongoClient, Collection, Db, Mongos } from 'mongodb'
 import { config } from './config';
-import { from } from 'linq';
 import { Block, Transaction, TransactionType, Tx4, Tx11, WithSender, Tx7 } from './api/interfaces';
-import { TESTNET_CONFIG } from '@waves/waves-api';
-import BigNumber from 'bignumber.js';
-import { Byte } from '@waves/waves-api/raw/src/classes/ByteProcessor';
 import { ServerRequest } from 'http';
 import { airdrop, airdropAmounts } from './waves/send';
-
-
-declare function emit(key: any, diff: ValuesDiff): void
-declare function emit(key: any, diff: any): void
-declare function NumberLong(n: number | string): number
 
 interface ValuesDiff {
   [index: string]: number
 }
 
-interface IDiff {
-  waves: ValuesDiff
-}
+declare function emit(key: any, diff: ValuesDiff): void
+declare function emit(key: any, diff: any): void
+declare function NumberLong(n: number | string): number
 
-async function reduceToWavesDiff(out: string) {
-  const db = await MongoClient.connect(config.mongoUri)
-  const blocks = await db.db('waves').createCollection('blocks')
-
-  const result = await blocks.mapReduce(
+async function reduceToWavesDiff(table: Collection<Block>, out: string, from?: number): Promise<void> {
+  const query = from ? { _id: { $gte: from } } : {}
+  await table.mapReduce(
     function (this: Block) {
 
       const toDiff = (block: Block, _tx: Transaction) => {
@@ -66,12 +55,12 @@ async function reduceToWavesDiff(out: string) {
             const buyer = tx.order1.orderType == 'buy' ? tx.order1.sender : tx.order2.sender
             const seller = tx.order1.orderType == 'sell' ? tx.order1.sender : tx.order2.sender
             const matcher = tx.sender
-            if (tx.order1.assetPair.priceAsset == null) {
+            if (tx.pair.priceAsset == null) {
               const value = Math.round((tx.price * tx.amount) / Math.pow(10, 8 + tx.pair.priceDecimals - tx.pair.amountDecimals))
               e(buyer, -value - tx.buyMatcherFee)
               e(seller, +value - tx.sellMatcherFee)
             }
-            else if (tx.order1.assetPair.amountAsset == null) {
+            else if (tx.pair.amountAsset == null) {
               e(buyer, + tx.amount - tx.buyMatcherFee)
               e(seller, -tx.amount - tx.sellMatcherFee)
             }
@@ -87,40 +76,30 @@ async function reduceToWavesDiff(out: string) {
           e(block.generator, _tx.fee)
         }
       }
-      //3P8tEm97ifGFK6fyLm6yxWabFsbDqyUugnb
-      //if (this._id == '51krrYm3TTezVtNLqri3KMSFA8JM6xry5koQTaBHTxjePdgC2NV7Lkf2YwG1GfiEkMLv524reRXECmUicY8VmgSa')
       this.transactions.forEach(t => toDiff(this, t))
     },
     function (key: number, values: ValuesDiff[]) {
-      //return { values: values.filter(v => v['3P8tEm97ifGFK6fyLm6yxWabFsbDqyUugnb']) }
       return values.reduce((a, b) => Object.keys(b).reduce((acc, key) => { acc[key] = (a[key] ? a[key] + b[key] : b[key]); return acc }, a), {})
     },
     {
+      query,
       // finalize: function (key: number, value: number) {
       //   return value
       // },
-      out
+      out: { merge: out },
     }
   )
-
-  const log = await db.db('waves').collection('blocks_diff').find({})
-
-  const r = (await log.toArray())
-
-  console.log(r)
+  //  const log = await db.db('waves').collection('blocks_diff').find({})
+  //  const r = (await log.toArray())
+  //  console.log(r)
   //console.log(r[0].value.values)
   //  console.log(Object.keys(r).length)
   //  console.log(from(r).distinct().toArray().length)
-
-  await db.close()
 }
 
-async function reduceToAddresses(out: string) {
-
-  const db = await MongoClient.connect(config.mongoUri)
-  const blocks = await db.db('waves').createCollection('blocks')
-
-  const result = await blocks.mapReduce(
+async function reduceToAddresses(table: Collection<Block>, out: string, from?: number) {
+  const query = from ? { _id: { $gte: from } } : {}
+  await table.mapReduce(
     function (this: Block) {
 
       const toDiff = (block: Block, _tx: Transaction) => {
@@ -161,53 +140,41 @@ async function reduceToAddresses(out: string) {
           e(block.generator)
         }
       }
-      //3P8tEm97ifGFK6fyLm6yxWabFsbDqyUugnb
-      //if (this._id == '51krrYm3TTezVtNLqri3KMSFA8JM6xry5koQTaBHTxjePdgC2NV7Lkf2YwG1GfiEkMLv524reRXECmUicY8VmgSa')
       this.transactions.forEach(t => toDiff(this, t))
     },
     function (key: number, values: ValuesDiff[]) {
       return { values }
     },
     {
+      query,
       // finalize: function (key: number, value: number) {
       //   return value
       // },
-      out
+      out: { merge: out }
     }
   )
 
-  const log = await db.db('waves').collection('blocks_diff').find({})
-
-  const r = (await log.toArray())
-
-  console.log(r)
+  //const log = await db.db('waves').collection('blocks_diff').find({})
+  //const r = (await log.toArray())
+  //console.log(r)
   //console.log(r[0].value.values)
   //  console.log(Object.keys(r).length)
   //  console.log(from(r).distinct().toArray().length)
-
-  await db.close()
-
 }
 
-async function computeWalletHeights(sourceTable: string, out: string) {
-  const db = await MongoClient.connect(config.mongoUri)
-  const blocks = await db.db('waves').collection(sourceTable)
-
-  const result = await blocks.aggregate([
+async function computeWalletHeights(table: Collection, out: string) {
+  await table.aggregate([
     //{ $replaceRoot: { newRoot: "$value" } },
     //{ $project: { v: { $objectToArray: "$value" } } },
     { $unwind: "$value.values" },
     { $group: { _id: "$value.values", height: { $min: "$_id" } } },
     { $out: out }
   ], { allowDiskUse: true }).toArray()
-  console.log(result)
-  await db.close()
 }
 
 const wavesMinimalBalance = 1000000000
-async function balanceByWallet(from: number, to: number) {
-  const db = await MongoClient.connect(config.mongoUri)
-  const blocks = await db.db('waves').collection('blocks_diff')
+async function balanceByWallet(db: Db, table: string, from: number, to: number) {
+  const blocks = await db.collection(table)
 
   const result = await blocks.aggregate([
     { $match: { $and: [{ _id: { $gte: from } }, { _id: { $lte: to } }] } },
@@ -235,30 +202,17 @@ async function balanceByWallet(from: number, to: number) {
     // Output to a collection "output"
   ]).toArray()
   console.log(result)
-  await db.close()
 }
 
-const tokens: { [i: string]: { id: string, price: number, decimals: number } } = {
-  BCH: { id: 'zMFqXuoyrn5w17PFurTqxB7GsS71fp9dfk6XFwxbPCy', price: 1241, decimals: 8 },
-  LIQUID: { id: '7FzrHF1pueRFrPEupz6oiVGTUZqe8epvC7ggWUx8n1bd', price: 3.36, decimals: 8 },
-  WCT: { id: 'DHgwrRvVyqJsepd32YbBqUeDH4GJ1N984X8QoekjgH8J', price: 0.82, decimals: 2 },
+enum Token {
+  BCH = 'BCH',
+  LIQUID = 'LIQUID',
+  WCT = 'WCT',
 }
 
-const total = 170600603611183
-const totalUSD = 5000
-const usdPerToken = totalUSD / 3
 
-const tokensToSpend = {
-  BCH: usdPerToken / tokens.BCH.price * Math.pow(10, tokens.BCH.decimals),
-  LIQUID: usdPerToken / tokens.LIQUID.price * Math.pow(10, tokens.LIQUID.decimals),
-  WCT: usdPerToken / tokens.WCT.price * Math.pow(10, tokens.WCT.decimals),
-}
-
-async function wallets(from: number, to: number) {
-  const db = await MongoClient.connect(config.mongoUri)
-  const blocks = await db.db('waves').collection('blocks_diff')
-
-  const result = await blocks.aggregate([
+async function walletsTotal(table: Collection, from: number, to: number): Promise<number> {
+  return (await table.aggregate([
     { $match: { $and: [{ _id: { $gte: from } }, { _id: { $lte: to } }] } },
 
     { $project: { v: { $objectToArray: "$value" } } },
@@ -277,32 +231,60 @@ async function wallets(from: number, to: number) {
     { $project: { diff: 1, height: { $arrayElemAt: ["$height", 0] } } },
     { $project: { diff: 1, height: "$height.height" } },
     { $match: { $and: [{ height: { $gte: from } }, { diff: { $gte: wavesMinimalBalance } }] } },
+    { $group: { _id: null, total: { $sum: "$diff" } } }
+  ]).toArray())[0].total
+}
+
+interface TokenInfo {
+  id: string,
+  symbol: string,
+  decimals: number,
+  priceInUSD: number
+}
+
+async function prepareDrop(table: Collection, options: { from: number, to: number, tokens: TokenInfo[], totalUSD: number }) {
+  const { from, to, tokens, totalUSD } = options
+  const perTokenUSD = totalUSD / tokens.length
+  const addFields = tokens
+    .map(t => ({ amountToSpend: perTokenUSD / t.priceInUSD * Math.pow(10, t.decimals), token: t }))
+    .reduce((acc: any, t) => { console.log(`${t.token.symbol}: ${Math.round(t.amountToSpend / Math.pow(10, t.token.decimals))}`); acc[t.token.symbol] = { $trunc: { $multiply: ["$share", t.amountToSpend] } }; return acc }, {})
+
+  const aggregateAndFilterByHeight: any[] = [
+    { $match: { $and: [{ _id: { $gte: from } }, { _id: { $lte: to } }] } },
+    { $project: { v: { $objectToArray: "$value" } } },
+    { $unwind: "$v" },
+    { $replaceRoot: { newRoot: "$v" } },
+    { $group: { _id: "$k", diff: { $sum: "$v" } } },
+    {
+      $lookup:
+        {
+          from: 'wallets',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'height',
+        }
+    },
+    { $project: { diff: 1, height: { $arrayElemAt: ["$height", 0] } } },
+    { $project: { diff: 1, height: "$height.height" } },
+    { $match: { $and: [{ height: { $gte: from } }, { diff: { $gte: wavesMinimalBalance } }] } },
+  ]
+
+  const total = (await table.aggregate(aggregateAndFilterByHeight.concat([{ $group: { _id: null, total: { $sum: "$diff" } } }])).toArray())[0].total
+
+  const out = "drop_" + from + "_" + to
+
+  const result = await table.aggregate(aggregateAndFilterByHeight.concat([
     {
       $addFields: {
         share:
           { $divide: ["$diff", total] }
       }
     },
-    {
-      $addFields: {
-        BCH:
-          { $trunc: { $multiply: ["$share", tokensToSpend.BCH] } },
-        LIQUID:
-          { $trunc: { $multiply: ["$share", tokensToSpend.LIQUID] } },
-        WCT:
-          { $trunc: { $multiply: ["$share", tokensToSpend.WCT] } }
-      }
-    },
-    { $out: "drop_" + from + "_" + to }
-
-
-    // Hey you can even sort it without breaking things
-    //{ $sort: { count: 1 } },
-    // Output to a collection "output"
-  ]).toArray()
-  await db.close()
-
-  return result
+    { $addFields: addFields },
+    { $out: out }
+  ])
+  ).toArray()
+  return out
 }
 
 const conditions: { [i: string]: any } = {
@@ -311,17 +293,15 @@ const conditions: { [i: string]: any } = {
   WCT: { WCT_DONE: null },
 }
 
-async function getWallets(table: string, limit: number, condition: any) {
-  const db = await MongoClient.connect(config.mongoUri)
-  const items = await db.db('waves').collection(table)
-
-  const r = await items.find(condition, { limit }).toArray()
-
-  await db.close()
-  return r
+async function getWallets(db: Db, table: string, limit: number, token: TokenInfo) {
+  const items = await db.collection(table)
+  const find: { [i: string]: any } = {}
+  find[token.symbol + '_DONE'] = null
+  find[token.symbol] = { $gt: 0 }
+  return await items.find(find, { limit }).toArray()
 }
 
-async function ddd() {
+async function output() {
   const db = await MongoClient.connect(config.mongoUri)
   db.db('waves').collection('drop_1002585_1004100').aggregate([
     { $project: { _id: 1, balance: { $divide: ["$diff", 100000000] }, share: 1, BCH: { $divide: ["$BCH", 100000000] }, LIQUID: { $divide: ["$LIQUID", 100000000] }, WCT: { $divide: ["$WCT", 100] } } },
@@ -329,59 +309,34 @@ async function ddd() {
   ]).toArray()
 }
 
-
-
-async function setWallets(table: string, wallets: string[], condition: any) {
-  const db = await MongoClient.connect(config.mongoUri)
-  const items = await db.db('waves').collection(table)
-
+async function markWalletsDropped(db: Db, table: string, wallets: string[], token: TokenInfo) {
+  const items = await db.collection(table)
   const c: { [i: string]: boolean } = {}
-  Object.assign(c, condition)
-  Object.keys(c).forEach(k => c[k] = true)
+  c[token.symbol + '_DONE'] = true
 
-  const r = await Promise.all(wallets.map(w =>
+  await Promise.all(wallets.map(w =>
     items.update(
       { "_id": w },
       { $set: c },
       { upsert: false }
     )))
-
-  await db.close()
-  return r
 }
 
-
-
-const countPart = (wavesBalance: number) => ((wavesBalance / total) * usdPerToken)
-
-async function drop(token: string) {
-  //const rr = await wallets(1002585, 1004100)
-  //console.log(tokensToSpend)
-  console.log(`${token} drop`)
+async function drop(db: Db, table: string, token: TokenInfo) {
+  const tokenSymbol = token.symbol
+  console.log(`${tokenSymbol} drop`)
 
   let total = 0
   let totalAmount = 0
   let r = []
   do {
-    r = await getWallets('drop_1002585_1004100', 100, conditions[token])
+    r = await getWallets(db, table, 100, token)
     try {
       if (r.length > 0)
-        await airdropAmounts(tokens[token].id, r.map(x => {
-          totalAmount += parseInt(x[token]);
-          let a = x._id
-          if (a == 'alias:W:soldavos')
-            a = '3PML8KeFaBeWrE5akh14VZ9HBnFyZvJGHfH'
-          if (a == 'alias:W:tharde')
-            a = '3PK5KEfW8VRqieT3dHDrjmHtQkjeX8uPp2x'
-          if (a == 'alias:W:waveshodl')
-            a = '3PJdZgQ9rvtQQyQMqGU3hdgNrnZKNfrBya4'
-          return {
-            address: a, amount: parseInt(x[token])
-          }
-        }), config.seed)
-      await setWallets('drop_1002585_1004100', r.map(x => x._id), conditions[token])
+        await airdropAmounts(token.id, r.map(x => ({ address: x._id, amount: x[tokenSymbol] })), config.seed)
+      await markWalletsDropped(db, table, r.map(x => x._id), conditions[tokenSymbol])
       total += r.length
-      console.log(`Progress: ${total}, amount: ${totalAmount}`)
+      console.log(`Progress: ${total}`)
     }
     catch (ex) {
       console.log(ex)
@@ -389,22 +344,49 @@ async function drop(token: string) {
 
   } while (r.length > 0)
 
-  console.log(`${token} completed`)
+  console.log(`${tokenSymbol} completed`)
 }
 
-async function d() {
-  //await drop('BCH')
-  //await drop('LIQUID')
-  //await drop('WCT')
+async function makeDrop(db: Db, table: string, tokens: TokenInfo[]) {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    await drop(db, table, token)
+  }
 }
 
-//1.241 BCH
-//3.36 LIQUID
-//0.82 WCT
+async function main() {
+  const db = (await MongoClient.connect(config.mongoUri))
+  const waves = db.db('waves')
+  const blocks = await waves.collection<Block>('blocks')
 
-//reduceToWavesDiff("blocks_diff")
-//reduceToAddresses("blocks_addr")
-//balanceByWallet(1002585, 1004100)
-//computeWalletHeights("blocks_addr", "wallets")
+  async function status() {
+    const currentOp = await waves.executeDbAdminCommand({
+      currentOp: true,
+    })
+    const r = currentOp.inprog.filter((o: any) => o.msg != null).forEach((o: any) => console.log(o.msg))
+  }
 
-ddd()
+  const tokens: TokenInfo[] = [
+    { id: 'zMFqXuoyrn5w17PFurTqxB7GsS71fp9dfk6XFwxbPCy', symbol: 'BCH', priceInUSD: 1302, decimals: 8 },
+    { id: '7FzrHF1pueRFrPEupz6oiVGTUZqe8epvC7ggWUx8n1bd', symbol: 'LIQUID', priceInUSD: 3.58, decimals: 8 },
+    { id: 'DHgwrRvVyqJsepd32YbBqUeDH4GJ1N984X8QoekjgH8J', symbol: 'WCT', priceInUSD: 0.85, decimals: 2 },
+  ]
+
+  const from = 1002585
+  const to = 1008200
+
+  //const interval = setInterval(status, 1000)
+  //await reduceToWavesDiff(blocks, "blocks_diff", from)
+  //await reduceToAddresses(blocks, "blocks_addr", from)
+  //const blocks_addr = await waves.collection('blocks_addr')
+  const blocks_diff = await waves.collection('blocks_diff')
+  //await computeWalletHeights(blocks_addr, "wallets")
+  //const total = await walletsTotal(blocks_diff, from, to)
+  //const dropTable = await prepareDrop(blocks_diff, { tokens, totalUSD: 5000, from, to })
+
+  await makeDrop(waves, 'drop_1002585_1008200', tokens)
+  await db.close()
+  //clearInterval(interval)
+}
+
+main()

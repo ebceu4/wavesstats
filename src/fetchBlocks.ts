@@ -1,57 +1,96 @@
-import { MongoClient } from 'mongodb'
+import { MongoClient, Collection } from 'mongodb'
 import { config } from './config'
 import axios from 'axios'
 import { Block, TransactionType, Asset, Tx7 } from './api/interfaces'
 import * as J from 'json-bigint'
 import * as W from '@waves/waves-api'
+import { ETXTBSY } from 'constants';
 
 const waves = W.create(W.MAINNET_CONFIG)
 
-const cache: { [i: string]: number } = {}
+const assetChache: { [i: string]: number } = {}
+const aliasChache: { [i: string]: string } = {}
 
 async function getDecimals(asset: Asset): Promise<number> {
 
   if (typeof asset == 'string' && asset != null) {
-    if (cache[asset] && cache[asset] > 0) {
-      return cache[asset]
+    if (assetChache[asset] && assetChache[asset] > 0) {
+      return assetChache[asset]
     }
 
     try {
       const d = (await axios.get(`https://nodes.wavesnodes.com/transactions/info/${asset}`)).data.decimals
-      cache[asset] = d
+      assetChache[asset] = d
       return d
     } catch (error) {
       return await getDecimals(asset)
     }
   }
-
   return 8
 }
 
+async function resolveAlias(alias: string): Promise<string> {
+  if (aliasChache[alias] && aliasChache[alias].length > 0) {
+    return aliasChache[alias]
+  }
+  try {
+    const d = (await axios.get(`https://nodes.wavesnodes.com/alias/by-alias/${alias}`)).data.address
+    aliasChache[alias] = d
+    return d
+  } catch (error) {
+    return await resolveAlias(alias)
+  }
+}
+
 async function getBlocks(from: number, to: number): Promise<Block[]> {
+  const aliasPrefix = 'alias:W:'
   try {
     const result = (await axios.get(`https://nodes.wavesnodes.com/blocks/seq/${from}/${to}`, {
       transformResponse: (data) => {
-        const blocks: any[] = J.parse(data)
-        return blocks.map((b: Block) => {
-          b._id = b.signature
-          return b
-        })
+        try {
+          const blocks: any[] = J.parse(data)
+          return blocks.map((b: Block) => {
+            b._id = b.signature
+            return b
+          })
+        } catch (ex) { }
       }
     })).data
     const r = await Promise.all(result.map((b: Block) => Promise.all(
-      b.transactions.filter(t => t.type == TransactionType.Exchange).map(async (t: Tx7) => {
-        t.order1.sender = waves.tools.getAddressFromPublicKey(t.order1.senderPublicKey)
-        t.order2.sender = waves.tools.getAddressFromPublicKey(t.order2.senderPublicKey)
+      b.transactions.map(async (t) => {
+        switch (t.type) {
+          case TransactionType.Exchange: {
+            const tx = <any>t
+            tx.order1.sender = waves.tools.getAddressFromPublicKey(tx.order1.senderPublicKey)
+            tx.order2.sender = waves.tools.getAddressFromPublicKey(tx.order2.senderPublicKey)
 
-        const amountAsset = t.order1.assetPair.amountAsset
-        const priceAsset = t.order1.assetPair.priceAsset
+            const amountAsset = tx.order1.assetPair.amountAsset
+            const priceAsset = tx.order1.assetPair.priceAsset
 
-        const amountDecimals = await getDecimals(amountAsset)
-        const priceDecimals = await getDecimals(priceAsset)
+            const amountDecimals = await getDecimals(amountAsset)
+            const priceDecimals = await getDecimals(priceAsset)
 
-        t.pair = { amountAsset, amountDecimals, priceAsset, priceDecimals }
+            tx.pair = { amountAsset, amountDecimals, priceAsset, priceDecimals }
 
+            delete tx.order1.assetPair
+            delete tx.order2.assetPair
+
+            break
+          }
+          case TransactionType.Transfer: {
+            if (t.recipient.startsWith(aliasPrefix))
+              t.recipient = await resolveAlias(t.recipient.substr(aliasPrefix.length))
+
+            break
+          }
+          case TransactionType.MassTransfer: {
+            await Promise.all(t.transfers
+              .filter(tr => tr.recipient.startsWith(aliasPrefix))
+              .map(async tr => await resolveAlias(tr.recipient.substr(aliasPrefix.length))))
+
+            break
+          }
+        }
         return true
       }))
     ))
@@ -59,56 +98,97 @@ async function getBlocks(from: number, to: number): Promise<Block[]> {
     return result
   }
   catch (ex) {
-    console.log(ex)
     console.log(`Retry from: ${from} to: ${to}`)
     return getBlocks(from, to)
   }
 }
 
-async function fetchBlocks() {
-  let blocksTotal = 0
+async function createDb() {
   const db = await MongoClient.connect(config.mongoUri)
   const blocksTable = await db.db('waves').createCollection('blocks')
   blocksTable.createIndex({ "transactions.id": 1 })
   blocksTable.createIndex({ _id: 1 })
-  const h = 1004100 // (await axios.get('https://nodes.wavesnodes.com/blocks/height')).data.height
-  const batchSize = 49
-  let c = h
+}
 
-  const start = Date.now()
+function fetchBlocks(table: Collection<Block>, params: { batchSize: number, threads: number, from?: number, to?: number }): Promise<void> {
+  return new Promise<void>(async (resolve, reject) => {
 
-  async function fetch() {
-    const t = c
-    c -= batchSize
+    let { batchSize, threads, from, to } = params
 
-    const blocks = await getBlocks(t - batchSize, t)
+    if (!from)
+      from = 1
 
-    Promise.all(blocks.map(block => {
-      delete block._id
+    if (!to) {
+      to = (await axios.get('https://nodes.wavesnodes.com/blocks/height')).data.height
+      console.log(`Current height resolved to: ${to}`)
+    }
 
-      blocksTable.update(
-        { "_id": block.height },
-        { $set: block },
-        { upsert: true }
-      ).catch(e => console.log(e))
-    })).then(_ => {
-      blocksTotal += (batchSize + 1)
-      console.log(`Blocks saved from: ${t - batchSize} to: ${t}`)
-      console.log(`Total: ${blocksTotal}, Speed: ${Math.round(blocksTotal / ((Date.now() - start) / 1000))} blocks/s`)
-    }).catch(e => console.log(e))
+    if (!to)
+      return
 
-    setTimeout(fetch, 1 + Math.random() * 100)
-  }
+    let blocksTotal = 0
 
-  for (let i = 0; i < 5; i++)
-    fetch()
+    let c = to
+    let cc = c
+    let completed = false
 
-  //db.close()
+    const start = Date.now()
 
+    console.log(`Starting blocks fetch, from: ${from} to: ${to}`)
+
+    async function fetch(from: number, to: number, forcedBatch?: number) {
+      if (!forcedBatch && c < from)
+        return
+
+      const batchEnd = forcedBatch ? forcedBatch : c
+      if (!forcedBatch)
+        c -= batchSize
+      const batchStart = forcedBatch ? forcedBatch : ((c < from) ? from : c)
+      if (!forcedBatch)
+        c -= 1
+
+      const blocks = await getBlocks(batchStart, batchEnd)
+
+      try {
+        await Promise.all(blocks.map(block => {
+          delete block._id
+          return table.update(
+            { "_id": block.height },
+            { $set: block },
+            { upsert: true }
+          ).catch(e => console.log(e))
+        }))
+
+      }
+      catch {
+        setTimeout(() => fetch(from, to, batchEnd), 1 + Math.random() * 100)
+        return
+      }
+
+      cc -= blocks.length
+      blocksTotal += blocks.length
+      console.log(`Blocks saved from: ${batchStart} to: ${batchEnd}`)
+      console.log(`Progress: ${blocksTotal}/${to - from}, Speed: ${Math.round(blocksTotal / ((Date.now() - start) / 1000))} blocks/s`)
+
+      if (cc >= from && !completed)
+        setTimeout(() => fetch(from, to), 1 + Math.random() * 100)
+      else if (!completed) {
+        completed = true
+        console.log(`Blocks fetch complete, from: ${from} to: ${to} total: ${blocksTotal}`)
+        resolve()
+      }
+    }
+
+    for (let i = 0; i < threads; i++)
+      fetch(from, to)
+  })
 }
 
 async function main() {
-  await fetchBlocks()
+  const db = await MongoClient.connect(config.mongoUri)
+  const blocksTable = await db.db('waves').collection<Block>('blocks')
+  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1006900, to: 1008200 })
+  await db.close()
 }
 
 main()

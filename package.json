@@ -10,7 +10,7 @@
     "build": "npm run build:commonjs && npm run build:es",
     "ts": "ts-node src/",
     "prepublishOnly": "npm run build",
-    "db": "mongod",
+    "db": "mongod --dbpath data/db",
     "restart": "rm -rf data && mkdir -p data/db && mongod --dbpath data/db"
   },
   "author": "",

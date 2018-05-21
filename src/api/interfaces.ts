@@ -1,4 +1,4 @@
-import { BigNumber } from 'bignumber.js'
+//import { BigNumber } from 'bignumber.js'
 
 export type Asset = string | null
 
@@ -44,10 +44,10 @@ export interface Order {
   sender: string;
   senderPublicKey: string;
   matcherPublicKey: string;
-  assetPair: {
-    priceAsset: Asset;
-    amountAsset: Asset;
-  };
+  // assetPair: {
+  //   priceAsset: Asset;
+  //   amountAsset: Asset;
+  // };ƒ
   orderType: 'buy' | 'sell';
   price: Long;
   amount: Long;
@@ -130,14 +130,13 @@ export interface Tx7 extends Tx, WithSender {
   price: Long;
   buyMatcherFee: Long;
   sellMatcherFee: Long;
+  //computed
   pair: {
     priceAsset: Asset;
     amountAsset: Asset;
     priceDecimals: number;
     amountDecimals: number;
   }
-  //computed
-
 }
 
 // lease
