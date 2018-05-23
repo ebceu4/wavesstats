@@ -3,12 +3,12 @@ import { config } from './config';
 import { Block, Transaction, TransactionType, Tx4, Tx11, WithSender, Tx7 } from './api/interfaces';
 import { ServerRequest } from 'http';
 import { airdrop, airdropAmounts } from './waves/send';
+import { reduceToIncomingTransfers } from './reduceIncomingTransfersFromEx';
 
 interface ValuesDiff {
   [index: string]: number
 }
 
-declare function emit(key: any, diff: ValuesDiff): void
 declare function emit(key: any, diff: any): void
 declare function NumberLong(n: number | string): number
 
@@ -103,23 +103,24 @@ async function reduceToAddresses(table: Collection<Block>, out: string, from?: n
     function (this: Block) {
 
       const toDiff = (block: Block, _tx: Transaction) => {
-        const e = (adress: string) => {
-          emit(block.height, adress)
+        const e = (address: string, type: string, timestamp?: number) => {
+          emit(block.height, address)
         }
+
         let tx
         switch (_tx.type) {
           case 4: {
             const tx = <Tx4>_tx
-            e(tx.sender)
-            e(tx.recipient)
+            e(tx.sender, 'sender')
+            e(tx.recipient, 'recipient')
             break;
           }
           case 11: {
             const tx = <Tx11>_tx
             tx.transfers.forEach(t => {
-              e(t.recipient)
+              e(t.recipient, 'recipient')
             })
-            e(tx.sender)
+            e(tx.sender, 'sender')
             break;
           }
           case 7: {
@@ -127,17 +128,17 @@ async function reduceToAddresses(table: Collection<Block>, out: string, from?: n
             const buyer = tx.order1.orderType == 'buy' ? tx.order1.sender : tx.order2.sender
             const seller = tx.order1.orderType == 'sell' ? tx.order1.sender : tx.order2.sender
             const matcher = tx.sender
-            e(buyer)
-            e(seller)
-            e(matcher)
+            e(buyer, 'buyer')
+            e(seller, 'seller')
+            e(matcher, 'matcher')
             break;
           }
         }
 
         {
           const tx = <WithSender>_tx
-          e(tx.sender)
-          e(block.generator)
+          e(tx.sender, 'sender')
+          e(block.generator, 'generator', block.timestamp)
         }
       }
       this.transactions.forEach(t => toDiff(this, t))
@@ -334,7 +335,7 @@ async function drop(db: Db, table: string, token: TokenInfo) {
     try {
       if (r.length > 0)
         await airdropAmounts(token.id, r.map(x => ({ address: x._id, amount: x[tokenSymbol] })), config.seed)
-      await markWalletsDropped(db, table, r.map(x => x._id), conditions[tokenSymbol])
+      await markWalletsDropped(db, table, r.map(x => x._id), token)
       total += r.length
       console.log(`Progress: ${total}`)
     }
@@ -376,15 +377,18 @@ async function main() {
   const to = 1008200
 
   //const interval = setInterval(status, 1000)
+  //await reduceToIncomingTransfers(blocks, "blocks_exchanges")
   //await reduceToWavesDiff(blocks, "blocks_diff", from)
   //await reduceToAddresses(blocks, "blocks_addr", from)
   //const blocks_addr = await waves.collection('blocks_addr')
-  const blocks_diff = await waves.collection('blocks_diff')
+  //const blocks_diff = await waves.collection('blocks_diff')
+  const blocks_exchanges = await waves.collection('blocks_exchanges')
   //await computeWalletHeights(blocks_addr, "wallets")
   //const total = await walletsTotal(blocks_diff, from, to)
-  //const dropTable = await prepareDrop(blocks_diff, { tokens, totalUSD: 5000, from, to })
+  //const dropTable = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to })
+  //const dropTable2 = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to: 1009500 })
 
-  await makeDrop(waves, 'drop_1002585_1008200', tokens)
+  await makeDrop(waves, 'drop_1002585_1009500', tokens)
   await db.close()
   //clearInterval(interval)
 }
