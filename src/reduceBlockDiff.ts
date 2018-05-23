@@ -333,9 +333,11 @@ async function drop(db: Db, table: string, token: TokenInfo) {
   do {
     r = await getWallets(db, table, 100, token)
     try {
-      if (r.length > 0)
-        await airdropAmounts(token.id, r.map(x => ({ address: x._id, amount: x[tokenSymbol] })), config.seed)
-      await markWalletsDropped(db, table, r.map(x => x._id), token)
+      if (r.length > 0) {
+        const d = await airdropAmounts(token.id, r.map(x => ({ address: x._id, amount: x[tokenSymbol] })), config.seed)
+        if (d.status == 200)
+          await markWalletsDropped(db, table, r.map(x => x._id), token)
+      }
       total += r.length
       console.log(`Progress: ${total}`)
     }
