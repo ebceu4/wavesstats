@@ -28,10 +28,12 @@
   "jsnext:main": "./es/index.js",
   "module": "./es/index.js",
   "dependencies": {
+    "@types/cli-progress": "^1.8.0",
     "@types/linq": "^2.2.33",
     "@waves/waves-api": "^0.28.0",
     "axios": "^0.18.0",
     "bignumber.js": "^7.0.1",
+    "cli-progress": "^2.0.0",
     "json-bigint": "^0.2.3",
     "linq": "^3.1.0",
     "long": "^4.0.0",

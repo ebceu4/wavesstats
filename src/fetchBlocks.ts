@@ -4,8 +4,9 @@ import axios from 'axios'
 import { Block, TransactionType, Asset, Tx7 } from './api/interfaces'
 import * as J from 'json-bigint'
 import * as W from '@waves/waves-api'
-import { ETXTBSY } from 'constants';
+import * as progress from 'cli-progress'
 
+const bar = new progress.Bar({}, progress.Presets.shades_classic)
 const waves = W.create(W.MAINNET_CONFIG)
 
 const assetChache: { [i: string]: number } = {}
@@ -23,6 +24,7 @@ async function getDecimals(asset: Asset): Promise<number> {
       assetChache[asset] = d
       return d
     } catch (error) {
+      console.log(error)
       return await getDecimals(asset)
     }
   }
@@ -38,6 +40,7 @@ async function resolveAlias(alias: string): Promise<string> {
     aliasChache[alias] = d
     return d
   } catch (error) {
+    console.log(error)
     return await resolveAlias(alias)
   }
 }
@@ -53,45 +56,49 @@ async function getBlocks(from: number, to: number): Promise<Block[]> {
             b._id = b.signature
             return b
           })
-        } catch (ex) { }
+        } catch (ex) { console.log(ex) }
       }
     })).data
     const r = await Promise.all(result.map((b: Block) => Promise.all(
       b.transactions.map(async (t) => {
-        switch (t.type) {
-          case TransactionType.Exchange: {
-            const tx = <any>t
-            tx.order1.sender = waves.tools.getAddressFromPublicKey(tx.order1.senderPublicKey)
-            tx.order2.sender = waves.tools.getAddressFromPublicKey(tx.order2.senderPublicKey)
+        try {
+          switch (t.type) {
+            case TransactionType.Exchange: {
+              const tx = <any>t
+              tx.order1.sender = waves.tools.getAddressFromPublicKey(tx.order1.senderPublicKey)
+              tx.order2.sender = waves.tools.getAddressFromPublicKey(tx.order2.senderPublicKey)
 
-            const amountAsset = tx.order1.assetPair.amountAsset
-            const priceAsset = tx.order1.assetPair.priceAsset
+              const amountAsset = tx.order1.assetPair.amountAsset
+              const priceAsset = tx.order1.assetPair.priceAsset
 
-            const amountDecimals = await getDecimals(amountAsset)
-            const priceDecimals = await getDecimals(priceAsset)
+              const amountDecimals = await getDecimals(amountAsset)
+              const priceDecimals = await getDecimals(priceAsset)
 
-            tx.pair = { amountAsset, amountDecimals, priceAsset, priceDecimals }
+              tx.pair = { amountAsset, amountDecimals, priceAsset, priceDecimals }
 
-            delete tx.order1.assetPair
-            delete tx.order2.assetPair
+              delete tx.order1.assetPair
+              delete tx.order2.assetPair
 
-            break
+              break
+            }
+            case TransactionType.Transfer: {
+              if (t.recipient.startsWith(aliasPrefix))
+                t.recipient = await resolveAlias(t.recipient.substr(aliasPrefix.length))
+
+              break
+            }
+            case TransactionType.MassTransfer: {
+              await Promise.all(t.transfers
+                .filter(tr => tr.recipient.startsWith(aliasPrefix))
+                .map(async tr => await resolveAlias(tr.recipient.substr(aliasPrefix.length))))
+
+              break
+            }
           }
-          case TransactionType.Transfer: {
-            if (t.recipient.startsWith(aliasPrefix))
-              t.recipient = await resolveAlias(t.recipient.substr(aliasPrefix.length))
-
-            break
-          }
-          case TransactionType.MassTransfer: {
-            await Promise.all(t.transfers
-              .filter(tr => tr.recipient.startsWith(aliasPrefix))
-              .map(async tr => await resolveAlias(tr.recipient.substr(aliasPrefix.length))))
-
-            break
-          }
+          return true
+        } catch (error) {
+          console.log(error)
         }
-        return true
       }))
     ))
 
@@ -123,8 +130,15 @@ function fetchBlocks(table: Collection<Block>, params: { batchSize: number, thre
       console.log(`Current height resolved to: ${to}`)
     }
 
-    if (!to)
+    if (!to) {
+      console.log(`Can't resolve current height`)
       return
+    }
+
+    if (from > to) {
+      console.log(`From: (${from}) should be less than To: (${to})`)
+      return
+    }
 
     let blocksTotal = 0
 
@@ -132,9 +146,9 @@ function fetchBlocks(table: Collection<Block>, params: { batchSize: number, thre
     let cc = c
     let completed = false
 
-    const start = Date.now()
-
     console.log(`Starting blocks fetch, from: ${from} to: ${to}`)
+    bar.start(to - from, 0)
+    const start = Date.now()
 
     async function fetch(from: number, to: number, forcedBatch?: number) {
       if (!forcedBatch && c < from)
@@ -160,20 +174,23 @@ function fetchBlocks(table: Collection<Block>, params: { batchSize: number, thre
         }))
 
       }
-      catch {
+      catch (ex) {
+        console.log(ex)
         setTimeout(() => fetch(from, to, batchEnd), 1 + Math.random() * 100)
         return
       }
 
       cc -= blocks.length
       blocksTotal += blocks.length
-      console.log(`Blocks saved from: ${batchStart} to: ${batchEnd}`)
-      console.log(`Progress: ${blocksTotal}/${to - from}, Speed: ${Math.round(blocksTotal / ((Date.now() - start) / 1000))} blocks/s`)
+      bar.update(blocksTotal)
+      //console.log(`Blocks saved from: ${batchStart} to: ${batchEnd}`)
+      //console.log(`Progress: ${blocksTotal}/${to - from}, Speed: ${Math.round(blocksTotal / ((Date.now() - start) / 1000))} blocks/s`)
 
       if (cc >= from && !completed)
         setTimeout(() => fetch(from, to), 1 + Math.random() * 100)
       else if (!completed) {
         completed = true
+        bar.stop()
         console.log(`Blocks fetch complete, from: ${from} to: ${to} total: ${blocksTotal}`)
         resolve()
       }
@@ -188,11 +205,12 @@ async function main() {
   const db = await MongoClient.connect(config.mongoUri)
   const blocksTable = await db.db('waves').collection<Block>('blocks')
   //await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1006900, to: 1008200 })
-  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1006900, to: 1009500 })
+  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1008000, to: 1013600 })//to: 1012400 })
   await db.close()
 }
 
 main()
+
 
 
 
