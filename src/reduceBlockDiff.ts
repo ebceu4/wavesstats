@@ -370,27 +370,27 @@ async function main() {
   }
 
   const tokens: TokenInfo[] = [
-    { id: 'zMFqXuoyrn5w17PFurTqxB7GsS71fp9dfk6XFwxbPCy', symbol: 'BCH', priceInUSD: 1084, decimals: 8 },
-    { id: '7FzrHF1pueRFrPEupz6oiVGTUZqe8epvC7ggWUx8n1bd', symbol: 'LIQUID', priceInUSD: 2.57, decimals: 8 },
-    { id: 'DHgwrRvVyqJsepd32YbBqUeDH4GJ1N984X8QoekjgH8J', symbol: 'WCT', priceInUSD: 0.60, decimals: 2 },
+    { id: 'zMFqXuoyrn5w17PFurTqxB7GsS71fp9dfk6XFwxbPCy', symbol: 'BCH', priceInUSD: 1073, decimals: 8 },
+    { id: '7FzrHF1pueRFrPEupz6oiVGTUZqe8epvC7ggWUx8n1bd', symbol: 'LIQUID', priceInUSD: 2.24, decimals: 8 },
+    { id: 'DHgwrRvVyqJsepd32YbBqUeDH4GJ1N984X8QoekjgH8J', symbol: 'WCT', priceInUSD: 0.61, decimals: 2 },
   ]
 
   const from = 1002585
-  const to = 1013600
+  const to = 1016400
 
   const interval = setInterval(status, 1000)
-  // await reduceToIncomingTransfers(blocks, "blocks_exchanges", from)
-  // await reduceToWavesDiff(blocks, "blocks_diff", from)
-  // await reduceToAddresses(blocks, "blocks_addr", from)
-  // const blocks_addr = await waves.collection('blocks_addr')
-  // const blocks_diff = await waves.collection('blocks_diff')
-  // const blocks_exchanges = await waves.collection('blocks_exchanges')
-  // await computeWalletHeights(blocks_addr, "wallets")
-  // //const total = await walletsTotal(blocks_diff, from, to)
-  // const dropTable = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to })
+  await reduceToIncomingTransfers(blocks, "blocks_exchanges", from)
+  await reduceToWavesDiff(blocks, "blocks_diff", from)
+  await reduceToAddresses(blocks, "blocks_addr", from)
+  const blocks_addr = await waves.collection('blocks_addr')
+  const blocks_diff = await waves.collection('blocks_diff')
+  const blocks_exchanges = await waves.collection('blocks_exchanges')
+  await computeWalletHeights(blocks_addr, "wallets")
+  // const total = await walletsTotal(blocks_diff, from, to)
+  const dropTable = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to })
   // //const dropTable2 = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to: 1009500 })
 
-  await makeDrop(waves, 'drop_1002585_1013600', tokens)
+  await makeDrop(waves, 'drop_1002585_1016400', tokens)
   await db.close()
   clearInterval(interval)
 }

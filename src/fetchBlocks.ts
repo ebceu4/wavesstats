@@ -205,7 +205,7 @@ async function main() {
   const db = await MongoClient.connect(config.mongoUri)
   const blocksTable = await db.db('waves').collection<Block>('blocks')
   //await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1006900, to: 1008200 })
-  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1008000, to: 1013600 })//to: 1012400 })
+  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1015100, to: 1016400 })//to: 1012400 })
   await db.close()
 }
 
