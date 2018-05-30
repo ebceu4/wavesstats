@@ -28,6 +28,8 @@ export async function reduceToIncomingTransfers(table: Collection<Block>, out: s
         '3PAf7hzLsAK1WGEqtfcigNx6ktbvnD7T9BP': true,
         '3PHsnzgm3JLWdrPJDZXbSePZ2PPuDmzdb4Y': true,
         '3PE93oWhtuqJXhigh18ATTiUzxZau983vuD': true,
+        '3PGXEsSmmiDwWXWVLrGFQjKFpGWC9NvUX9e': true, // https://liqui.io/
+        '3PLPGmXoDNKeWxSgJRU5vDNogbPj7hJiWQx': true, // https://kuna.io/
       }
 
       const toDiff = (block: Block, _tx: Transaction) => {

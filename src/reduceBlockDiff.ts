@@ -376,7 +376,8 @@ async function main() {
   ]
 
   const from = 1002585
-  const to = 1016400
+  const to = 1019100
+  const to2 = 1020400
 
   const interval = setInterval(status, 1000)
   await reduceToIncomingTransfers(blocks, "blocks_exchanges", from)
@@ -388,9 +389,10 @@ async function main() {
   await computeWalletHeights(blocks_addr, "wallets")
   // const total = await walletsTotal(blocks_diff, from, to)
   const dropTable = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to })
-  // //const dropTable2 = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to: 1009500 })
+  const dropTable2 = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to: to2 })
 
-  await makeDrop(waves, 'drop_1002585_1016400', tokens)
+  await makeDrop(waves, 'drop_1002585_1019100', tokens)
+  await makeDrop(waves, 'drop_1002585_1020400', tokens)
   await db.close()
   clearInterval(interval)
 }
