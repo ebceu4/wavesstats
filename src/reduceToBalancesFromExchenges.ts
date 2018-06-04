@@ -9,8 +9,7 @@ interface ValuesDiff {
 }
 declare function emit(key: any, diff: any): void
 
-
-export async function reduceToIncomingTransfers(table: Collection<Block>, out: string, from?: number) {
+export async function reduceToBalancesFromExchenges(table: Collection<Block>, out: string, from?: number) {
   const query = from ? { _id: { $gte: from } } : {}
   await table.mapReduce(
     function (this: Block) {
@@ -30,6 +29,7 @@ export async function reduceToIncomingTransfers(table: Collection<Block>, out: s
         '3PE93oWhtuqJXhigh18ATTiUzxZau983vuD': true,
         '3PGXEsSmmiDwWXWVLrGFQjKFpGWC9NvUX9e': true, // https://liqui.io/
         '3PLPGmXoDNKeWxSgJRU5vDNogbPj7hJiWQx': true, // https://kuna.io/
+        '3PJNxhi7EB6hDL1gkvLdJVbwmVVW3EwsaMS': true, // https://changelly.com/ 
       }
 
       const toDiff = (block: Block, _tx: Transaction) => {

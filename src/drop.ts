@@ -3,165 +3,10 @@ import { config } from './config';
 import { Block, Transaction, TransactionType, Tx4, Tx11, WithSender, Tx7 } from './api/interfaces';
 import { ServerRequest } from 'http';
 import { airdrop, airdropAmounts } from './waves/send';
-import { reduceToIncomingTransfers } from './reduceIncomingTransfersFromEx';
+import { reduceToBalancesFromExchenges } from './reduceToBalancesFromExchenges';
+import { reduceToWalletHeight } from './reduceToWalletHeight';
+import { reduceToWavesBalance } from './reduceToWavesBalance';
 
-interface ValuesDiff {
-  [index: string]: number
-}
-
-declare function emit(key: any, diff: any): void
-declare function NumberLong(n: number | string): number
-
-async function reduceToWavesDiff(table: Collection<Block>, out: string, from?: number): Promise<void> {
-  const query = from ? { _id: { $gte: from } } : {}
-  await table.mapReduce(
-    function (this: Block) {
-
-      const toDiff = (block: Block, _tx: Transaction) => {
-        const e = (adress: string, value: number) => {
-          const diff: ValuesDiff = {}
-          diff[adress] = value
-          emit(block.height, diff)
-        }
-        let tx
-        switch (_tx.type) {
-          case 4: {
-            const tx = <Tx4>_tx
-            if (!tx.assetId) {
-              e(tx.sender, -tx.amount)
-              e(tx.recipient, tx.amount)
-            }
-
-            if (!tx.feeAsset) {
-              e(tx.sender, -tx.fee)
-              e(block.generator, tx.fee)
-            }
-
-            break;
-          }
-          case 11: {
-            const tx = <Tx11>_tx
-            if (!tx.assetId) {
-              tx.transfers.forEach(t => {
-                e(t.recipient, t.amount)
-                e(tx.sender, -t.amount)
-              })
-            }
-
-            break;
-          }
-          case 7: {
-            const tx = <Tx7>_tx
-            const buyer = tx.order1.orderType == 'buy' ? tx.order1.sender : tx.order2.sender
-            const seller = tx.order1.orderType == 'sell' ? tx.order1.sender : tx.order2.sender
-            const matcher = tx.sender
-            if (tx.pair.priceAsset == null) {
-              const value = Math.round((tx.price * tx.amount) / Math.pow(10, 8 + tx.pair.priceDecimals - tx.pair.amountDecimals))
-              e(buyer, -value - tx.buyMatcherFee)
-              e(seller, +value - tx.sellMatcherFee)
-            }
-            else if (tx.pair.amountAsset == null) {
-              e(buyer, + tx.amount - tx.buyMatcherFee)
-              e(seller, -tx.amount - tx.sellMatcherFee)
-            }
-
-            e(matcher, tx.buyMatcherFee + tx.sellMatcherFee)
-            break;
-          }
-        }
-
-        if (_tx.type != 4 && (<WithSender>_tx).sender) {
-          const tx = <WithSender>_tx
-          e(tx.sender, -_tx.fee)
-          e(block.generator, _tx.fee)
-        }
-      }
-      this.transactions.forEach(t => toDiff(this, t))
-    },
-    function (key: number, values: ValuesDiff[]) {
-      return values.reduce((a, b) => Object.keys(b).reduce((acc, key) => { acc[key] = (a[key] ? a[key] + b[key] : b[key]); return acc }, a), {})
-    },
-    {
-      query,
-      // finalize: function (key: number, value: number) {
-      //   return value
-      // },
-      out: { merge: out },
-    }
-  )
-  //  const log = await db.db('waves').collection('blocks_diff').find({})
-  //  const r = (await log.toArray())
-  //  console.log(r)
-  //console.log(r[0].value.values)
-  //  console.log(Object.keys(r).length)
-  //  console.log(from(r).distinct().toArray().length)
-}
-
-async function reduceToAddresses(table: Collection<Block>, out: string, from?: number) {
-  const query = from ? { _id: { $gte: from } } : {}
-  await table.mapReduce(
-    function (this: Block) {
-
-      const toDiff = (block: Block, _tx: Transaction) => {
-        const e = (address: string, type: string, timestamp?: number) => {
-          emit(block.height, address)
-        }
-
-        let tx
-        switch (_tx.type) {
-          case 4: {
-            const tx = <Tx4>_tx
-            e(tx.sender, 'sender')
-            e(tx.recipient, 'recipient')
-            break;
-          }
-          case 11: {
-            const tx = <Tx11>_tx
-            tx.transfers.forEach(t => {
-              e(t.recipient, 'recipient')
-            })
-            e(tx.sender, 'sender')
-            break;
-          }
-          case 7: {
-            const tx = <Tx7>_tx
-            const buyer = tx.order1.orderType == 'buy' ? tx.order1.sender : tx.order2.sender
-            const seller = tx.order1.orderType == 'sell' ? tx.order1.sender : tx.order2.sender
-            const matcher = tx.sender
-            e(buyer, 'buyer')
-            e(seller, 'seller')
-            e(matcher, 'matcher')
-            break;
-          }
-        }
-
-        {
-          const tx = <WithSender>_tx
-          e(tx.sender, 'sender')
-          e(block.generator, 'generator', block.timestamp)
-        }
-      }
-      this.transactions.forEach(t => toDiff(this, t))
-    },
-    function (key: number, values: ValuesDiff[]) {
-      return { values }
-    },
-    {
-      query,
-      // finalize: function (key: number, value: number) {
-      //   return value
-      // },
-      out: { merge: out }
-    }
-  )
-
-  //const log = await db.db('waves').collection('blocks_diff').find({})
-  //const r = (await log.toArray())
-  //console.log(r)
-  //console.log(r[0].value.values)
-  //  console.log(Object.keys(r).length)
-  //  console.log(from(r).distinct().toArray().length)
-}
 
 async function computeWalletHeights(table: Collection, out: string) {
   await table.aggregate([
@@ -370,29 +215,29 @@ async function main() {
   }
 
   const tokens: TokenInfo[] = [
-    { id: 'zMFqXuoyrn5w17PFurTqxB7GsS71fp9dfk6XFwxbPCy', symbol: 'BCH', priceInUSD: 1073, decimals: 8 },
-    { id: '7FzrHF1pueRFrPEupz6oiVGTUZqe8epvC7ggWUx8n1bd', symbol: 'LIQUID', priceInUSD: 2.24, decimals: 8 },
-    { id: 'DHgwrRvVyqJsepd32YbBqUeDH4GJ1N984X8QoekjgH8J', symbol: 'WCT', priceInUSD: 0.61, decimals: 2 },
+    { id: 'zMFqXuoyrn5w17PFurTqxB7GsS71fp9dfk6XFwxbPCy', symbol: 'BCH', priceInUSD: 1035, decimals: 8 },
+    { id: '7FzrHF1pueRFrPEupz6oiVGTUZqe8epvC7ggWUx8n1bd', symbol: 'LIQUID', priceInUSD: 2.12, decimals: 8 },
+    { id: 'DHgwrRvVyqJsepd32YbBqUeDH4GJ1N984X8QoekjgH8J', symbol: 'WCT', priceInUSD: 0.59, decimals: 2 },
   ]
 
   const from = 1002585
-  const to = 1019100
-  const to2 = 1020400
+  const to1 = 1027000
+  //const to2 = 1025000
+  //const to2 = 1020400
 
   const interval = setInterval(status, 1000)
-  await reduceToIncomingTransfers(blocks, "blocks_exchanges", from)
-  await reduceToWavesDiff(blocks, "blocks_diff", from)
-  await reduceToAddresses(blocks, "blocks_addr", from)
+  await reduceToBalancesFromExchenges(blocks, "blocks_exchanges", from)
+  await reduceToWavesBalance(blocks, "blocks_diff", from)
+  await reduceToWalletHeight(blocks, "blocks_addr", from)
   const blocks_addr = await waves.collection('blocks_addr')
   const blocks_diff = await waves.collection('blocks_diff')
   const blocks_exchanges = await waves.collection('blocks_exchanges')
-  await computeWalletHeights(blocks_addr, "wallets")
-  // const total = await walletsTotal(blocks_diff, from, to)
-  const dropTable = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to })
-  const dropTable2 = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to: to2 })
+  // await computeWalletHeights(blocks_addr, "wallets")
+  const dropTable = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to: to1 })
+  // const dropTable2 = await prepareDrop(blocks_exchanges, { tokens, totalUSD: 5000, from, to: to2 })
 
-  await makeDrop(waves, 'drop_1002585_1019100', tokens)
-  await makeDrop(waves, 'drop_1002585_1020400', tokens)
+  await makeDrop(waves, 'drop_1002585_' + to1, tokens)
+  //await makeDrop(waves, 'drop_1002585_' + to2, tokens)
   await db.close()
   clearInterval(interval)
 }
