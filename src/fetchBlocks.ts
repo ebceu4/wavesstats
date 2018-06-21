@@ -206,7 +206,7 @@ async function main() {
   const blocksTable = await db.db('waves').collection<Block>('blocks')
   //await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1006900, to: 1008200 })
   //1019100
-  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1024000, to: 1027000 })//to: 1012400 })
+  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1024000 })//to: 1012400 })
   await db.close()
 }
 
