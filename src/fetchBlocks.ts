@@ -19,12 +19,16 @@ async function getDecimals(asset: Asset): Promise<number> {
       return assetChache[asset]
     }
 
+    const uri = `https://nodes.wavesnodes.com/transactions/info/${asset}`
+
     try {
-      const d = (await axios.get(`https://nodes.wavesnodes.com/transactions/info/${asset}`)).data.decimals
+      const d = (await axios.get(uri)).data.decimals
       assetChache[asset] = d
       return d
     } catch (error) {
-      console.log(error)
+      //console.log("Error: " + asset)
+      //console.log(error.response.data)
+      console.log(uri)
       return await getDecimals(asset)
     }
   }
@@ -40,7 +44,7 @@ async function resolveAlias(alias: string): Promise<string> {
     aliasChache[alias] = d
     return d
   } catch (error) {
-    console.log(error)
+    //console.log(error.response)
     return await resolveAlias(alias)
   }
 }
@@ -59,8 +63,12 @@ async function getBlocks(from: number, to: number): Promise<Block[]> {
         } catch (ex) { console.log(ex) }
       }
     })).data
-    const r = await Promise.all(result.map((b: Block) => Promise.all(
-      b.transactions.map(async (t) => {
+
+
+    for (let i = 0; i < result.length; i++) {
+      const block = result[i] as Block
+      for (let j = 0; j < block.transactions.length; j++) {
+        const t = block.transactions[j]
         try {
           switch (t.type) {
             case TransactionType.Exchange: {
@@ -88,19 +96,21 @@ async function getBlocks(from: number, to: number): Promise<Block[]> {
               break
             }
             case TransactionType.MassTransfer: {
-              await Promise.all(t.transfers
-                .filter(tr => tr.recipient.startsWith(aliasPrefix))
-                .map(async tr => await resolveAlias(tr.recipient.substr(aliasPrefix.length))))
-
+              for (let k = 0; k < t.transfers.length; k++) {
+                const tr = t.transfers[k]
+                if (tr.recipient.startsWith(aliasPrefix)) {
+                  tr.recipient = await resolveAlias(tr.recipient.substr(aliasPrefix.length))
+                }
+              }
               break
             }
           }
-          return true
         } catch (error) {
           console.log(error)
         }
-      }))
-    ))
+      }
+
+    }
 
     return result
   }
@@ -206,7 +216,8 @@ async function main() {
   const blocksTable = await db.db('waves').collection<Block>('blocks')
   //await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1006900, to: 1008200 })
   //1019100
-  await fetchBlocks(blocksTable, { batchSize: 29, threads: 4, from: 1024000 })//to: 1012400 })
+  //await fetchBlocks(blocksTable, { batchSize: 99, threads: 3, from: 1060000, to: 1075700 })
+  await fetchBlocks(blocksTable, { batchSize: 99, threads: 3, from: 1075000, to: 1076730 })
   await db.close()
 }
 
